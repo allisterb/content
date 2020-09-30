@@ -1,12 +1,11 @@
-from datetime import date, datetime, timezone
-from json import dumps
-from typing import Any, Dict, List, Optional, Tuple, Union, cast
+from datetime import date, datetime
+from typing import Any, Dict, List
 
 import demistomock as demisto  # noqa: F401
 import urllib3
 from CommonServerPython import *  # noqa: F401
-from kubernetes import client, config
-from kubernetes.client import ApiClient, Configuration, api, models
+from kubernetes import client
+from kubernetes.client import ApiClient, Configuration
 from kubernetes.client.api import CoreV1Api
 from kubernetes.client.models import (V1APIVersions, V1Pod, V1PodList,
                                       V1ServiceList)
@@ -83,15 +82,15 @@ class Client(BaseClient):
         return client.CoreApi(api_client=self.api_client).get_api_versions()
 
     def get_pods_raw(self, ns=None) -> V1PodList:
-        if not ns is None:
-            return self.api.list_namespaced_pod(ns)
-        else:
+        if ns is None:
             return self.api.list_pod_for_all_namespaces()
+        else:
+            return self.api.list_namespaced_pod(ns)
 
     def try_get_pod(self, ns: str, pod_name: str) -> V1Pod:
         try:
             return self.api.read_namespaced_pod(pod_name, ns)
-        except:
+        except BaseException:
             return None
 
     def pod_exec(self, ns, pod_name, cmd) -> str:
@@ -125,19 +124,22 @@ class Client(BaseClient):
             else:
                 return osFamily
             return f'{osFamily}:{osVersion}'
+        else:
+            return''
 
     def pod_get_os_packages_raw(self, ns, pod_name) -> Dict[str, Any]:
         osinfo = self.pod_detect_os(ns, pod_name)
         if osinfo == '':
-            return []
+            return {}
         name, version = osinfo.split(':')[0], osinfo.split(':')[1]
         cmd = ''
         if name in ('rhel', 'centos', 'oraclelinux', 'suse', 'fedora'):
             cmd = """rpm -qa --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\\n'"""
         elif name in ('debian', 'ubuntu', 'kali', 'linuxmint'):
-            cmd = """dpkg-query -W -f='${Status} ${Package} ${Version} ${Architecture}\\n'|awk '($1 == "install") && ($2 == "ok") {print $4" "$5" "$6}'"""
+            cmd = """dpkg-query -W -f='${Status} ${Package} ${Version} ${Architecture}\\n' |\
+                awk '($1 == "install") && ($2 == "ok") {print $4" "$5" "$6}'"""
         else:
-            return []
+            return {}
         active_kernel = self.pod_exec(ns, pod_name, "uname -r")
         package_list = self.pod_exec(ns, pod_name, cmd).splitlines()
         packages = [package for package in package_list if not (
@@ -170,10 +172,10 @@ class Client(BaseClient):
                 } for r in ret['reasons']]
 
     def list_services(self) -> V1ServiceList:
-        if not self.namespace is None:
-            return self.api.list_namespaced_service(self.namespace)
-        else:
+        if self.namespace is None:
             return self.api.list_service_for_all_namespaces()
+        else:
+            return self.api.list_namespaced_service(self.namespace)
 
     def get_pods_readable(self, ret: Dict[str, Any]) -> List[Dict[str, Any]]:
         return [{
